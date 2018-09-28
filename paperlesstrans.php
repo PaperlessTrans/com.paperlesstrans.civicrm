@@ -93,7 +93,7 @@ function paperlesstrans_civicrm_upgrade($op, CRM_Queue_Queue $queue = NULL) {
  */
 function paperlesstrans_civicrm_managed(&$entities) {
   $entities[] = array(
-    'module' => 'com.groupwho.paperlesstrans',
+    'module' => 'com.paperlesstrans.civicrm',
     'name' => 'Paperless Transactions Credit Card',
     'entity' => 'PaymentProcessorType',
     'params' => array(
@@ -105,17 +105,17 @@ function paperlesstrans_civicrm_managed(&$entities) {
       'billing_mode' => 'form',
       'user_name_label' => 'Terminal ID',
       'password_label' => 'Terminal Key',
-      'url_site_default' => 'https://svc.paperlesstrans.com:9999/?wsdl',
-      'url_recur_default' => 'https://svc.paperlesstrans.com:9999/?wsdl',
-      'url_site_test_default' => 'http://svc.paperlesstrans.com:8888/?wsdl',
-      'url_recur_test_default' => 'http://svc.paperlesstrans.com:8888/?wsdl',
+      'url_site_default'       => 'https://api.paperlesstrans.com',
+      'url_recur_default'      => 'https://api.paperlesstrans.com',
+      'url_site_test_default'  => 'https://api.paperlesstrans.com',
+      'url_recur_test_default' => 'https://api.paperlesstrans.com',
       'is_recur' => 1,
       'payment_type' => 1,
     ),
   );
 
   $entities[] = array(
-    'module' => 'com.groupwho.paperlesstrans',
+    'module' => 'com.paperlesstrans.civicrm',
     'name' => 'Paperless Transactions ACH/EFT',
     'entity' => 'PaymentProcessorType',
     'params' => array(
@@ -127,10 +127,10 @@ function paperlesstrans_civicrm_managed(&$entities) {
       'billing_mode' => 'form',
       'user_name_label' => 'Terminal ID',
       'password_label' => 'Terminal Key',
-      'url_site_default' => 'https://svc.paperlesstrans.com:9999/?wsdl',
-      'url_recur_default' => 'https://svc.paperlesstrans.com:9999/?wsdl',
-      'url_site_test_default' => 'http://svc.paperlesstrans.com:8888/?wsdl',
-      'url_recur_test_default' => 'http://svc.paperlesstrans.com:8888/?wsdl',
+      'url_site_default'       => 'https://api.paperlesstrans.com',
+      'url_recur_default'      => 'https://api.paperlesstrans.com',
+      'url_site_test_default'  => 'https://api.paperlesstrans.com',
+      'url_recur_test_default' => 'https://api.paperlesstrans.com',
       'is_recur' => 1,
       'payment_type' => 2,
       'payment_instrument_id' => '2',
@@ -178,63 +178,193 @@ function paperlesstrans_civicrm_alterSettingsFolders(&$metaDataFolders = NULL) {
   _paperlesstrans_civix_civicrm_alterSettingsFolders($metaDataFolders);
 }
 
-/**
- * Functions below this ship commented out. Uncomment as required.
- *
+function paperlesstrans_civicrm_buildForm($formName, &$form) {
+  if ($formName == 'CRM_Contribute_Form_Contribution_Main' &&
+    _paperlesstrans_paperlessEnabled($form)
+  ) {
+    _paperlesstrans_buildForm_Contrib_front($form);
+  }
+
+  if ($formName == 'CRM_Contribute_Form_Contribution_Confirm' &&
+    _paperlesstrans_paperlessSelected($form)
+  ) {
+    $templatePath = realpath(dirname(__FILE__)."/templates");
+    CRM_Core_Region::instance('page-body')->add(array(
+      'template' => "{$templatePath}/CRM/Contribute/Form/Contribution/Confirm.paperless.tpl"
+    ));
+    $session    = CRM_Core_Session::singleton();
+    $futureDate = $session->get("future_receive_date_{$form->_params['qfKey']}");
+
+    // override civi's receive date
+    // 1. this makes contribution receive-date and recur start-date created by
+    //    civi, set to future date, and hook doesn't require working it out.
+    // 2. Also thankyou template displays correct date.
+    // 3. Receipt will use same dates.
+    $futureDate = $futureDate ? $futureDate : date('YmdHis');
+    $form->_params['receive_date'] = $futureDate;
+    $form->assign('receive_date', $futureDate);
+  }
+}
+
+function paperlesstrans_civicrm_postProcess($formName, &$form) {
+  if (($formName == 'CRM_Contribute_Form_Contribution_Main') &&
+    _paperlesstrans_paperlessEnabled($form)
+  ) {
+    //_paperless_debug('paperlesstrans_civicrm_postProcess $form', $form);
+    $session = CRM_Core_Session::singleton();
+    CRM_Core_Error::debug_var('Main $form->_submitValues', $form->_submitValues);
+    if (!empty($form->_submitValues['future_receive_date'])) {
+      $session->set("future_receive_date_{$form->_submitValues['qfKey']}", $form->_submitValues['future_receive_date']);
+    }
+    else {
+      $session->set("future_receive_date_{$form->_submitValues['qfKey']}", NULL);
+    }
+  }
+}
+
+function paperlesstrans_civicrm_navigationMenu(&$params) {
+  $pages = array(
+    'settings_page' => array(
+      'label' => 'Paperless Payments Settings',
+      'name' => 'Paperless Payments Settings',
+      'url' => 'civicrm/admin/contribute/paperlesssettings',
+      'parent' => array('Administer', 'CiviContribute'),
+      'permission' => 'access CiviContribute,administer CiviCRM',
+      'operator' => 'AND',
+      'separator' => NULL,
+      'active' => 1,
+    ),
+  );
+  foreach ($pages as $item) {
+    // Check that our item doesn't already exist.
+    $menu_item_search = array('url' => $item['url']);
+    $menu_items = array();
+    CRM_Core_BAO_Navigation::retrieve($menu_item_search, $menu_items);
+    if (empty($menu_items)) {
+      $path = implode('/', $item['parent']);
+      unset($item['parent']);
+      _paperlesstrans_civix_insert_navigation_menu($params, $path, $item);
+    }
+  }
+}
+
+function _paperlesstrans_buildForm_Contrib_front(&$form) {
+  $settings = CRM_Core_BAO_Setting::getItem('Paperless Payments Extension', 'paperless_settings');
+  //_paperless_debug('_paperlesstrans_buildForm_Contrib_front $settings', $settings);
+
+
+  if (!empty($settings['enable_public_future_start'])) {
+    $allow_days = empty($settings['days']) ? array('-1') : $settings['days'];
+    $datetime   = $form->get('future_receive_date_time');
+    if (empty($datetime)) {
+      // this is to make sure we not rebuilding array indexes, as user goes back and forward
+      // on the wizard. Otherwise element default doesn't work.
+      $datetime = time();
+      $form->set('future_receive_date_time', $datetime);
+    }
+    $start_dates = _paperlesstrans_get_future_monthly_start_dates($datetime, $allow_days);
+    $form->add('select', 'future_receive_date', ts('Contribution Transaction Date'), $start_dates);
+
+    CRM_Core_Region::instance('price-set-1')->add(array(
+      'template' => 'CRM/Paperlesstrans/BillingBlockFutureStart.tpl',
+    ));
+  }
+}
 
 /**
- * Implements hook_civicrm_preProcess().
+ * @param $form
  *
- * @link http://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_preProcess
+ * @return bool
  *
-function paperlesstrans_civicrm_preProcess($formName, &$form) {
-
-} // */
-
-  /**
-   * Implements hook_civicrm_validateForm().
-   */
-  function paperlesstrans_civicrm_validateForm($formName, &$fields, &$files, &$form, &$errors) {
-    if ($formName == 'CRM_Contribute_Form_ContributionPage_Amount') {
-      if (isset($fields['is_recur'])) {
-        foreach (array_keys($fields['payment_processor']) as $paymentProcessorID) {
-          $paymentProcessorTypeId = CRM_Core_DAO::getFieldValue(
-            'CRM_Financial_DAO_PaymentProcessor',
-            $paymentProcessorID,
-            'payment_processor_type_id'
-          );
-          $paymentProcessorType = CRM_Core_PseudoConstant::paymentProcessorType(FALSE, $paymentProcessorTypeId, 'name');
-
-          // If it is Paperless processor.
-          if (strstr($paymentProcessorType, 'Paperless Transactions')) {
-            if (!empty($fields['is_recur_interval'])) {
-              $errors['is_recur_interval'] = ts('Paperless Transaction does not support the recurring intervals setting.');
-            }
-
-            if (!empty($fields['recur_frequency_unit']['day'])) {
-              $errors['recur_frequency_unit'] = ts('Paperless Transaction does not support *day* as a recurring frequency.');
-            }
-
-            break;
-          }
-        }
-      }
+ * helper to determine if the contrib page has a paperless processor enabled
+ */
+function _paperlesstrans_paperlessEnabled($form) {
+  foreach ($form->_paymentProcessors as $processor) {
+    if (in_array($processor['class_name'], array(
+        'Payment_PaperlessTransACH',
+        'Payment_PaperlessTransCC',
+      )) && $processor['is_active']
+    ) {
+      return TRUE;
     }
   }
 
+  return FALSE;
+}
+
 /**
- * Implements hook_civicrm_navigationMenu().
+ * @param $form
  *
- * @link http://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_navigationMenu
+ * @return bool
  *
-function paperlesstrans_civicrm_navigationMenu(&$menu) {
-  _paperlesstrans_civix_insert_navigation_menu($menu, NULL, array(
-    'label' => ts('The Page', array('domain' => 'com.groupwho.paperlesstrans')),
-    'name' => 'the_page',
-    'url' => 'civicrm/the-page',
-    'permission' => 'access CiviReport,access CiviContribute',
-    'operator' => 'OR',
-    'separator' => 0,
-  ));
-  _paperlesstrans_civix_navigationMenu($menu);
-} // */
+ * helper to determine if the contrib page has a paperless processor selected
+ */
+function _paperlesstrans_paperlessSelected($form) {
+  $pp = civicrm_api(
+    'PaymentProcessor', 
+    'getsingle', 
+    array(
+      'id'      => $form->_params['payment_processor_id'], 
+      'version' => 3
+    )
+  );
+  return in_array($pp['class_name'], array('Payment_PaperlessTransACH', 'Payment_PaperlessTransCC')); 
+}
+
+/**
+ * Function _paperlesstrans_get_future_start_dates
+ *
+ * @string $start_date a timestamp, only return dates after this.
+ * @array $allow_days an array of allowable days of the month.
+ */
+function _paperlesstrans_get_future_monthly_start_dates($start_date, $allow_days) {
+  // Future date options.
+  $start_dates = array();
+  // special handling for today - it means immediately or now.
+  $today = date('YmdHis');
+  $todaysDay = date('j');
+  // If not set, only allow for the first 28 days of the month.
+  if (max($allow_days) <= 0) {
+    $allow_days = range(1,28);
+  }
+  if (!in_array($todaysDay, $allow_days)) {
+    $start_dates[''] = ts('Now');
+  }
+  for ($j = 0; $j < count($allow_days); $j++) {
+    // So I don't get into an infinite loop somehow ..
+    $i = 0;
+    $dp = getdate($start_date);
+    while (($i++ < 60) && !in_array($dp['mday'], $allow_days)) {
+      $start_date += (24 * 60 * 60);
+      $dp = getdate($start_date);
+    }
+    $key = date('YmdHis', $start_date);
+    if ($key == $today) { // special handling
+      $display = ts('Now');
+      $key = ''; // date('YmdHis');
+    }
+    else {
+      $display = strftime('%B %e, %Y', $start_date);
+    }
+    $start_dates[$key] = $display;
+    $start_date += (24 * 60 * 60);
+  }
+  return $start_dates;
+}
+
+/**
+ * @param $msg
+ * @param $var
+ * @param $force boolean
+ *
+ * wrapper for CiviCRM debugging to:
+ *
+ * 1. only log to file if system debug is enabled
+ * 2. log to separate log file with paperless prefix
+ * 3. allow forced logging (log even when debugging is disabled)
+ */
+function _paperless_debug($msg, $var, $force = FALSE) {
+  if (Civi::settings()->get('debug_enabled') || $force) {
+    CRM_Core_Error::debug_var($msg, $var, TRUE, TRUE, 'paperless');
+  }
+}

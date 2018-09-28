@@ -31,9 +31,8 @@ class CRM_Core_Payment_PaperlessTransCC extends CRM_Core_Payment_PaperlessTrans 
     $this->_resultFunctionsMap = self::_mapResultFunctions();
     $this->_frequencyMap = self::_mapFrequency();
 
-    // Set transaction type for Soap call.
+    // Set transaction type
     $this->_transactionType = 'processCard';
-    $this->_transactionTypeRecur = 'SetupCardSchedule';
 
     // Get merchant data from config.
     $config = CRM_Core_Config::singleton();
@@ -85,37 +84,52 @@ class CRM_Core_Payment_PaperlessTransCC extends CRM_Core_Payment_PaperlessTrans 
     }
 
     $params = array(
-      'req' => array(
-        'CardPresent' =>  'False',
-        'Card'        => array(
-          'CardNumber'  => $this->_getParam('credit_card_number'),
-          'ExpirationMonth' => $this->_getParam('month'),
-          'ExpirationYear'=> $this->_getParam('year'),
-          'SecurityCode'  => $this->_getParam('cvv2'),
-          'NameOnAccount' => $full_name,
-          'Address'   => array(
-            'Street'  =>  $this->_getParam('street_address'),
-            'City'    =>  $this->_getParam('city'),
-            'State'   =>  $state_code,
-            'Zip'     =>  $this->_getParam('postal_code'),
-            'Country' =>  $country_code,
+      'source' => array(
+        'card' => array(
+          'accountNumber'  => $this->_getParam('credit_card_number'),
+          'expiration'     => $this->_getParam('month') . '/' . $this->_getParam('year'),
+          'securityCode'   => $this->_getParam('cvv2'),
+          'nameOnAccount'  => $full_name,
+          'billingAddress' => array(
+            'street'  => $this->_getParam('street_address'),
+            'city'    => $this->_getParam('city'),
+            'state'   => $state_code,
+            'postal'  => $this->_getParam('postal_code'),
+            'country' => $country_code,
           ),
-          /*'Identification'=> array(
-            'IDType'  =>  '1',
-            'State'   =>  'TX',
-            'Number'  =>  '12345678',
-            'Expiration'=>  '12/31/2012',
-            'DOB'   =>  '12/31/1956',
-            'Address' => array(
-              'Street'  =>  '1234 Main Street',
-              'City'    =>  'Anytown',
-              'State'   =>  'TX',
-              'Zip'   =>  '99999',
-              'Country' =>  'US',
-            ),
-          ),*/
         ),
       ),
+      //'req' => array(
+      //  'CardPresent' => 'False',
+      //  'Card' => array(
+      //    'CardNumber'  => $this->_getParam('credit_card_number'),
+      //    'ExpirationMonth' => $this->_getParam('month'),
+      //    'ExpirationYear'=> $this->_getParam('year'),
+      //    'SecurityCode'  => $this->_getParam('cvv2'),
+      //    'NameOnAccount' => $full_name,
+      //    'Address' => array(
+      //      'Street' => $this->_getParam('street_address'),
+      //      'City' => $this->_getParam('city'),
+      //      'State' => $state_code,
+      //      'Zip' => $this->_getParam('postal_code'),
+      //      'Country' => $country_code,
+      //    ),
+      //    /*'Identification'=> array(
+      //      'IDType'  =>  '1',
+      //      'State'   =>  'TX',
+      //      'Number'  =>  '12345678',
+      //      'Expiration'=>  '12/31/2012',
+      //      'DOB'   =>  '12/31/1956',
+      //      'Address' => array(
+      //        'Street'  =>  '1234 Main Street',
+      //        'City'    =>  'Anytown',
+      //        'State'   =>  'TX',
+      //        'Zip'   =>  '99999',
+      //        'Country' =>  'US',
+      //      ),
+      //    ),*/
+      //  ),
+      //),
     );
 
     // Add the ProfileNumber to update existing subscription.
@@ -127,9 +141,7 @@ class CRM_Core_Payment_PaperlessTransCC extends CRM_Core_Payment_PaperlessTrans 
   }
 
   public function _createCCProfile() {
-
   }
-
 
  /**
    * Submit a payment.
@@ -141,6 +153,8 @@ class CRM_Core_Payment_PaperlessTransCC extends CRM_Core_Payment_PaperlessTrans 
    *   The result in a nice formatted array (or an error object).
    */
   public function doDirectPayment(&$params) {
+    //$this->_ppDebug('doDirectPayment CC $params', $params);
+
     // Set params in our own storage.
     foreach ($params as $field => $value) {
       $this->_setParam($field, $value);
@@ -197,9 +211,9 @@ class CRM_Core_Payment_PaperlessTransCC extends CRM_Core_Payment_PaperlessTrans 
 
     // Handle errors.
     if (is_a($result, 'CRM_Core_Error')) {
-      $error_message = 'There was an error with the transaction.  Please check logs: ';
-      echo $error_message . '<p>';
-      CRM_Core_Error::debug_log_message($error_message);
+      $error_message = 'There was an error with the transaction. Please check logs: ';
+      $this->_ppDebug($error_message, $result);
+
       return $result;
     }
 
